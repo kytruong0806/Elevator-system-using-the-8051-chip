@@ -1,0 +1,940 @@
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 1   
+
+
+C51 COMPILER V9.01, COMPILATION OF MODULE U1_MASTER
+OBJECT MODULE PLACED IN U1_master.OBJ
+COMPILER INVOKED BY: C:\Keil\C51\BIN\C51.EXE U1_master.c BROWSE DEBUG OBJECTEXTEND TABS(2)
+
+line level    source
+
+   1          /* =====================================================
+   2             U1 - TRUNG TAM DIEU KHIEN GOI TANG
+   3             AT89C52, thach anh 11.0592MHz
+   4          
+   5             - Doc nut goi tang (P1) + nut cabin (P2)
+   6             - Xu ly logic thang may + thoi gian cua
+   7             - Hien thi thong bao tren LCD 16x2 (che do 4 bit)
+   8                 D4..D7 = P0.0..P0.3 (BIT1..BIT4, co dien tro keo len)
+   9                 RS = P3.2, RW = P3.3, E = P3.4
+  10             - Gui lenh + so tang sang U4 qua UART
+  11               (U1 P3.1 TXD  --->  U4 P3.0 RXD)
+  12             ===================================================== */
+  13          
+  14          #include <reg52.h>
+  15          #include <intrins.h>
+  16          
+  17          /* =========================
+  18             KHAI BAO CHAN
+  19             ========================= */
+  20          
+  21          /* LCD 16x2 che do 4 bit
+  22             Du lieu: P0.0..P0.3 = BIT1..BIT4 = D4..D7 (ghi bang P0)
+  23             Dieu khien: RS1, RW1, E1 noi vao P3.2, P3.3, P3.4 */
+  24          sbit LCD_RS = P3^2;
+  25          sbit LCD_RW = P3^3;
+  26          sbit LCD_E  = P3^4;
+  27          
+  28          /* PORT 1: nut goi tang */
+  29          sbit BTN_0_FLU = P1^7;   /* BTN0U */
+  30          
+  31          sbit BTN_1_FLD = P1^6;   /* BTN1D */
+  32          sbit BTN_1_FLU = P1^5;   /* BTN1U */
+  33          
+  34          sbit BTN_2_FLD = P1^4;   /* BTN2D */
+  35          sbit BTN_2_FLU = P1^3;   /* BTN2U */
+  36          
+  37          sbit BTN_3_FLD = P1^2;   /* BTN3D */
+  38          sbit BTN_3_FLU = P1^1;   /* BTN3U */
+  39          
+  40          sbit BTN_4_FLD = P1^0;   /* BTN4  */
+  41          
+  42          /* PORT 3.7: nut STOP khan cap, active-low (can tro keo len 10k khi lam mach that) */
+  43          sbit BTN_STOP = P3^7;
+  44          
+  45          /* PORT 2: LED bao da goi tang, sang toi khi thang phuc vu xong
+  46             Moi LED ung voi dung 1 nut o P1 (xem so do U1: BTNFL4D..BTNFL0U).
+  47             Gia su LED noi qua tro xuong GND, muc 1 = sang.
+  48             Neu LED sang nguoc (LED dau kia len VCC), doi P2 = ~ledLatch. */
+  49          #define LED_4D  0x01   /* P2.0 - sang khi nhan BTN_4_FLD (P1.0) */
+  50          #define LED_3D  0x02   /* P2.1 - sang khi nhan BTN_3_FLD (P1.2) */
+  51          #define LED_2D  0x04   /* P2.2 - sang khi nhan BTN_2_FLD (P1.4) */
+  52          #define LED_1D  0x08   /* P2.3 - sang khi nhan BTN_1_FLD (P1.6) */
+  53          #define LED_3U  0x10   /* P2.4 - sang khi nhan BTN_3_FLU (P1.1) */
+  54          #define LED_2U  0x20   /* P2.5 - sang khi nhan BTN_2_FLU (P1.3) */
+  55          #define LED_1U  0x40   /* P2.6 - sang khi nhan BTN_1_FLU (P1.5) */
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 2   
+
+  56          #define LED_0U  0x80   /* P2.7 - sang khi nhan BTN_0_FLU (P1.7) */
+  57          
+  58          unsigned char ledLatch = 0x00;   /* anh xa truc tiep 8 bit cua P2 */
+  59          
+  60          /* PORT 3: P3.0 = RXD, P3.1 = TXD (UART noi voi U4) */
+  61          
+  62          
+  63          /* =========================
+  64             GIAO THUC UART U1 -> U4
+  65             Khung 4 byte:
+  66             [0xA5] [CMD] [FLOOR] [~(CMD ^ FLOOR)]
+  67             ========================= */
+  68          
+  69          #define FRAME_HEAD      0xA5
+  70          
+  71          #define CMD_UP          0x01   /* motor thang len  + LED UP   */
+  72          #define CMD_DOWN        0x02   /* motor thang xuong + LED DOWN */
+  73          #define CMD_DOOR_OPEN   0x04   /* motor cua chieu mo   */
+  74          #define CMD_DOOR_CLOSE  0x08   /* motor cua chieu dong */
+  75          #define CMD_WAIT        0x10   /* LED WAIT */
+  76          #define CMD_BUZZ        0x20   /* coi */
+  77          
+  78          unsigned char outCmd = 0;
+  79          
+  80          /* Keu coi 6 x 50ms = 300ms */
+  81          #define BUZZ_TIME 6
+  82          unsigned char buzz_timer = 0;
+  83          
+  84          
+  85          /* =========================
+  86             BIEN HE THONG
+  87             ========================= */
+  88          
+  89          unsigned char requests[5]   = { 0, 0, 0, 0, 0 };
+  90          unsigned char buttonLock[5] = { 0, 0, 0, 0, 0 };
+  91          
+  92          char currentFloor = 0;
+  93          char targetFloor = -1;
+  94          
+  95          bit isMoving = 0;
+  96          
+  97          /* Dung khan cap: 1 = dang giu nut STOP */
+  98          bit emergency = 0;
+  99          
+ 100          unsigned int timer_count = 0;
+ 101          
+ 102          /*
+ 103             doorState:
+ 104             0 = cua dong
+ 105             1 = cua dang mo
+ 106             2 = cua dang giu
+ 107             3 = cua dang dong
+ 108          */
+ 109          unsigned char doorState = 0;
+ 110          unsigned char door_timer = 0;
+ 111          
+ 112          /* Timer 0 = 50ms */
+ 113          #define DOOR_OPEN_TIME  20
+ 114          #define DOOR_WAIT_TIME  20
+ 115          #define DOOR_CLOSE_TIME 20
+ 116          
+ 117          
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 3   
+
+ 118          /* =========================
+ 119             HAM DELAY
+ 120             ========================= */
+ 121          
+ 122          void delay_ms(unsigned int ms)
+ 123          {
+ 124   1          unsigned int i;
+ 125   1          unsigned int j;
+ 126   1      
+ 127   1          for(i = 0; i < ms; i++)
+ 128   1          {
+ 129   2              for(j = 0; j < 120; j++)
+ 130   2              {
+ 131   3                  ;
+ 132   3              }
+ 133   2          }
+ 134   1      }
+ 135          
+ 136          
+ 137          /* =========================
+ 138             LCD 16x2 - 4 BIT
+ 139             Chi ghi (RW luon = 0), khong doc busy
+ 140             ========================= */
+ 141          
+ 142          void lcd_delay(void)
+ 143          {
+ 144   1          unsigned char i;
+ 145   1      
+ 146   1          for(i = 0; i < 40; i++)
+ 147   1          {
+ 148   2              _nop_();
+ 149   2          }
+ 150   1      }
+ 151          
+ 152          void lcd_write_nibble(unsigned char nib, unsigned char rs)
+ 153          {
+ 154   1          LCD_E  = 0;
+ 155   1          LCD_RW = 0;
+ 156   1          LCD_RS = (rs != 0);
+ 157   1      
+ 158   1          /* Chi dung P0.0..P0.3, cac bit cao de muc 1 */
+ 159   1          P0 = 0xF0 | (nib & 0x0F);
+ 160   1      
+ 161   1          _nop_();
+ 162   1          _nop_();
+ 163   1      
+ 164   1          LCD_E = 1;
+ 165   1      
+ 166   1          _nop_();
+ 167   1          _nop_();
+ 168   1          _nop_();
+ 169   1          _nop_();
+ 170   1      
+ 171   1          LCD_E = 0;
+ 172   1      
+ 173   1          lcd_delay();
+ 174   1      }
+ 175          
+ 176          void lcd_cmd(unsigned char c)
+ 177          {
+ 178   1          lcd_write_nibble(c >> 4, 0);
+ 179   1          lcd_write_nibble(c & 0x0F, 0);
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 4   
+
+ 180   1      
+ 181   1          /* Lenh clear / home can cho lau hon */
+ 182   1          if(c <= 0x03)
+ 183   1              delay_ms(3);
+ 184   1      }
+ 185          
+ 186          void lcd_data(unsigned char c)
+ 187          {
+ 188   1          lcd_write_nibble(c >> 4, 1);
+ 189   1          lcd_write_nibble(c & 0x0F, 1);
+ 190   1      }
+ 191          
+ 192          void lcd_goto(unsigned char row)
+ 193          {
+ 194   1          if(row == 0)
+ 195   1              lcd_cmd(0x80);
+ 196   1          else
+ 197   1              lcd_cmd(0xC0);
+ 198   1      }
+ 199          
+ 200          void lcd_print(char *s)
+ 201          {
+ 202   1          while(*s)
+ 203   1          {
+ 204   2              lcd_data(*s);
+ 205   2              s++;
+ 206   2          }
+ 207   1      }
+ 208          
+ 209          void lcd_init(void)
+ 210          {
+ 211   1          delay_ms(30);
+ 212   1      
+ 213   1          /* Trinh tu dua LCD ve che do 4 bit */
+ 214   1          lcd_write_nibble(0x03, 0);
+ 215   1          delay_ms(5);
+ 216   1          lcd_write_nibble(0x03, 0);
+ 217   1          delay_ms(1);
+ 218   1          lcd_write_nibble(0x03, 0);
+ 219   1          delay_ms(1);
+ 220   1          lcd_write_nibble(0x02, 0);
+ 221   1          delay_ms(1);
+ 222   1      
+ 223   1          lcd_cmd(0x28);      /* 4 bit, 2 dong, 5x8 */
+ 224   1          lcd_cmd(0x0C);      /* bat hien thi, tat con tro */
+ 225   1          lcd_cmd(0x06);      /* tu dong tang con tro */
+ 226   1          lcd_cmd(0x01);      /* xoa man hinh */
+ 227   1      }
+ 228          
+ 229          
+ 230          /* =========================
+ 231             THONG BAO LCD
+ 232             Dong 1: "Tang hien tai: X"
+ 233             Dong 2: trang thai thang may
+ 234             Chi ve lai khi co thay doi
+ 235             ========================= */
+ 236          
+ 237          char lcdFloor = -1;
+ 238          unsigned char lcdState = 0xFF;
+ 239          char lcdTarget = -2;
+ 240          
+ 241          unsigned char digit_char(char n)
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 5   
+
+ 242          {
+ 243   1          if(n >= 0 && n <= 4)
+ 244   1              return (unsigned char)('0' + n);
+ 245   1      
+ 246   1          return '-';
+ 247   1      }
+ 248          
+ 249          void lcd_update(void)
+ 250          {
+ 251   1          char floor_now;
+ 252   1          char target_now;
+ 253   1          unsigned char st;
+ 254   1      
+ 255   1          /* Dung khan cap: ghi de man hinh, bo qua trang thai khac */
+ 256   1          if(emergency)
+ 257   1          {
+ 258   2              if(lcdState != 6)
+ 259   2              {
+ 260   3                  lcd_goto(0);
+ 261   3                  lcd_print("!! DUNG KHAN CAP");
+ 262   3                  lcd_goto(1);
+ 263   3                  lcd_print("Nha nut de chay ");
+ 264   3      
+ 265   3                  lcdState = 6;
+ 266   3                  lcdFloor = -1;    /* buoc ve lai dong 1 khi het khan cap */
+ 267   3              }
+ 268   2      
+ 269   2              return;
+ 270   2          }
+ 271   1      
+ 272   1          /* Chup lai trang thai hien tai */
+ 273   1          floor_now  = currentFloor;
+ 274   1          target_now = targetFloor;
+ 275   1      
+ 276   1          /*
+ 277   1             st:
+ 278   1             0 = san sang
+ 279   1             1 = dang len
+ 280   1             2 = dang xuong
+ 281   1             3 = cua dang mo
+ 282   1             4 = cua dang giu
+ 283   1             5 = cua dang dong
+ 284   1             (6 = dung khan cap, xu ly rieng o tren)
+ 285   1          */
+ 286   1          if(doorState == 1)
+ 287   1              st = 3;
+ 288   1          else if(doorState == 2)
+ 289   1              st = 4;
+ 290   1          else if(doorState == 3)
+ 291   1              st = 5;
+ 292   1          else if(isMoving)
+ 293   1          {
+ 294   2              if(outCmd & CMD_UP)
+ 295   2                  st = 1;
+ 296   2              else
+ 297   2                  st = 2;
+ 298   2          }
+ 299   1          else
+ 300   1              st = 0;
+ 301   1      
+ 302   1          /* Khong doi gi thi khong ve lai (tranh nhap nhay) */
+ 303   1          if(floor_now == lcdFloor && st == lcdState && target_now == lcdTarget)
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 6   
+
+ 304   1              return;
+ 305   1      
+ 306   1          /* Dong 1: tang hien tai */
+ 307   1          if(floor_now != lcdFloor)
+ 308   1          {
+ 309   2              lcd_goto(0);
+ 310   2              lcd_print("Tang hien tai: ");
+ 311   2              lcd_data(digit_char(floor_now));
+ 312   2          }
+ 313   1      
+ 314   1          /* Dong 2: trang thai */
+ 315   1          if(st != lcdState || target_now != lcdTarget)
+ 316   1          {
+ 317   2              lcd_goto(1);
+ 318   2      
+ 319   2              switch(st)
+ 320   2              {
+ 321   3                  case 0:
+ 322   3                      lcd_print("San sang        ");
+ 323   3                      break;
+ 324   3      
+ 325   3                  case 1:
+ 326   3                      lcd_print("Di len -> tang ");
+ 327   3                      lcd_data(digit_char(target_now));
+ 328   3                      break;
+ 329   3      
+ 330   3                  case 2:
+ 331   3                      lcd_print("Di xuong->tang ");
+ 332   3                      lcd_data(digit_char(target_now));
+ 333   3                      break;
+ 334   3      
+ 335   3                  case 3:
+ 336   3                      lcd_print("Da den - Mo cua ");
+ 337   3                      break;
+ 338   3      
+ 339   3                  case 4:
+ 340   3                      lcd_print("Moi vao thang   ");
+ 341   3                      break;
+ 342   3      
+ 343   3                  default:
+ 344   3                      lcd_print("Cua dang dong   ");
+ 345   3                      break;
+ 346   3              }
+ 347   2          }
+ 348   1      
+ 349   1          lcdFloor  = floor_now;
+ 350   1          lcdState  = st;
+ 351   1          lcdTarget = target_now;
+ 352   1      }
+ 353          
+ 354          
+ 355          /* =========================
+ 356             LED WAIT (dieu khien qua U4)
+ 357             ========================= */
+ 358          
+ 359          void wait_led_on(void)
+ 360          {
+ 361   1          outCmd |= CMD_WAIT;
+ 362   1      }
+ 363          
+ 364          void wait_led_off(void)
+ 365          {
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 7   
+
+ 366   1          outCmd &= ~CMD_WAIT;
+ 367   1      }
+ 368          
+ 369          
+ 370          /* =========================
+ 371             MOTOR THANG (dieu khien qua U4)
+ 372             ========================= */
+ 373          
+ 374          void stop_motor(void)
+ 375          {
+ 376   1          outCmd &= ~(CMD_UP | CMD_DOWN);
+ 377   1      
+ 378   1          isMoving = 0;
+ 379   1      }
+ 380          
+ 381          void start_up(void)
+ 382          {
+ 383   1          outCmd &= ~CMD_DOWN;
+ 384   1          outCmd |= CMD_UP;
+ 385   1      
+ 386   1          isMoving = 1;
+ 387   1          timer_count = 0;
+ 388   1      }
+ 389          
+ 390          void start_down(void)
+ 391          {
+ 392   1          outCmd &= ~CMD_UP;
+ 393   1          outCmd |= CMD_DOWN;
+ 394   1      
+ 395   1          isMoving = 1;
+ 396   1          timer_count = 0;
+ 397   1      }
+ 398          
+ 399          
+ 400          /* =========================
+ 401             MOTOR CUA (dieu khien qua U4)
+ 402             ========================= */
+ 403          
+ 404          void stop_door_motor(void)
+ 405          {
+ 406   1          outCmd &= ~(CMD_DOOR_OPEN | CMD_DOOR_CLOSE);
+ 407   1      }
+ 408          
+ 409          void start_door_open(void)
+ 410          {
+ 411   1          if(doorState != 0)
+ 412   1              return;
+ 413   1      
+ 414   1          wait_led_on();
+ 415   1      
+ 416   1          outCmd &= ~CMD_DOOR_CLOSE;
+ 417   1          outCmd |= CMD_DOOR_OPEN;
+ 418   1      
+ 419   1          /* Keu coi bao den tang */
+ 420   1          buzz_timer = BUZZ_TIME;
+ 421   1          outCmd |= CMD_BUZZ;
+ 422   1      
+ 423   1          door_timer = DOOR_OPEN_TIME;
+ 424   1          doorState = 1;
+ 425   1      }
+ 426          
+ 427          void hold_door_open(void)
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 8   
+
+ 428          {
+ 429   1          stop_door_motor();
+ 430   1      
+ 431   1          wait_led_on();
+ 432   1      
+ 433   1          door_timer = DOOR_WAIT_TIME;
+ 434   1          doorState = 2;
+ 435   1      }
+ 436          
+ 437          void start_door_close(void)
+ 438          {
+ 439   1          wait_led_on();
+ 440   1      
+ 441   1          outCmd &= ~CMD_DOOR_OPEN;
+ 442   1          outCmd |= CMD_DOOR_CLOSE;
+ 443   1      
+ 444   1          door_timer = DOOR_CLOSE_TIME;
+ 445   1          doorState = 3;
+ 446   1      }
+ 447          
+ 448          void finish_door_close(void)
+ 449          {
+ 450   1          stop_door_motor();
+ 451   1      
+ 452   1          wait_led_off();
+ 453   1      
+ 454   1          doorState = 0;
+ 455   1          targetFloor = -1;
+ 456   1      }
+ 457          
+ 458          
+ 459          /* =========================
+ 460             CAP NHAT YEU CAU TANG
+ 461             ========================= */
+ 462          
+ 463          void update_floor_request(unsigned char floor,
+ 464                                    unsigned char pressed)
+ 465          {
+ 466   1          if(pressed)
+ 467   1          {
+ 468   2              /* Chi tao request o lan nhan dau tien */
+ 469   2              if(buttonLock[floor] == 0)
+ 470   2              {
+ 471   3                  requests[floor] = 1;
+ 472   3                  buttonLock[floor] = 1;
+ 473   3              }
+ 474   2          }
+ 475   1          else
+ 476   1          {
+ 477   2              buttonLock[floor] = 0;
+ 478   2          }
+ 479   1      }
+ 480          
+ 481          
+ 482          /* =========================
+ 483             TAT LED CUA 1 TANG KHI DA PHUC VU XONG
+ 484             Tang 1,2,3 co 2 nut (len/xuong) nen tat ca 2 LED cung luc,
+ 485             vi requests[] hien gop chung 1 bit cho ca tang.
+ 486             ========================= */
+ 487          
+ 488          void clear_floor_leds(unsigned char floor)
+ 489          {
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 9   
+
+ 490   1          switch(floor)
+ 491   1          {
+ 492   2              case 0: ledLatch &= (unsigned char)~LED_0U; break;
+ 493   2              case 1: ledLatch &= (unsigned char)~(LED_1D | LED_1U); break;
+ 494   2              case 2: ledLatch &= (unsigned char)~(LED_2D | LED_2U); break;
+ 495   2              case 3: ledLatch &= (unsigned char)~(LED_3D | LED_3U); break;
+ 496   2              case 4: ledLatch &= (unsigned char)~LED_4D; break;
+ 497   2              default: break;
+ 498   2          }
+ 499   1      
+ 500   1          P2 = ledLatch;
+ 501   1      }
+ 502          
+ 503          
+ 504          /* =========================
+ 505             QUET CAC NUT
+ 506             ========================= */
+ 507          
+ 508          void scan_buttons(void)
+ 509          {
+ 510   1          unsigned char pressed0;
+ 511   1          unsigned char pressed1;
+ 512   1          unsigned char pressed2;
+ 513   1          unsigned char pressed3;
+ 514   1          unsigned char pressed4;
+ 515   1      
+ 516   1          /* Tang 0 */
+ 517   1          pressed0 = 0;
+ 518   1          if(BTN_0_FLU == 0) { pressed0 = 1; ledLatch |= LED_0U; }
+ 519   1      
+ 520   1          /* Tang 1 */
+ 521   1          pressed1 = 0;
+ 522   1          if(BTN_1_FLD == 0) { pressed1 = 1; ledLatch |= LED_1D; }
+ 523   1          if(BTN_1_FLU == 0) { pressed1 = 1; ledLatch |= LED_1U; }
+ 524   1      
+ 525   1          /* Tang 2 */
+ 526   1          pressed2 = 0;
+ 527   1          if(BTN_2_FLD == 0) { pressed2 = 1; ledLatch |= LED_2D; }
+ 528   1          if(BTN_2_FLU == 0) { pressed2 = 1; ledLatch |= LED_2U; }
+ 529   1      
+ 530   1          /* Tang 3 */
+ 531   1          pressed3 = 0;
+ 532   1          if(BTN_3_FLD == 0) { pressed3 = 1; ledLatch |= LED_3D; }
+ 533   1          if(BTN_3_FLU == 0) { pressed3 = 1; ledLatch |= LED_3U; }
+ 534   1      
+ 535   1          /* Tang 4 */
+ 536   1          pressed4 = 0;
+ 537   1          if(BTN_4_FLD == 0) { pressed4 = 1; ledLatch |= LED_4D; }
+ 538   1      
+ 539   1          update_floor_request(0, pressed0);
+ 540   1          update_floor_request(1, pressed1);
+ 541   1          update_floor_request(2, pressed2);
+ 542   1          update_floor_request(3, pressed3);
+ 543   1          update_floor_request(4, pressed4);
+ 544   1      
+ 545   1          P2 = ledLatch;   /* xuat het 8 LED cung 1 lan */
+ 546   1      }
+ 547          
+ 548          
+ 549          /* =========================
+ 550             TIM TANG GAN NHAT
+ 551             ========================= */
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 10  
+
+ 552          
+ 553          char find_nearest_request(void)
+ 554          {
+ 555   1          char i;
+ 556   1          char distance;
+ 557   1          char bestFloor = -1;
+ 558   1          char bestDistance = 100;
+ 559   1      
+ 560   1          for(i = 0; i < 5; i++)
+ 561   1          {
+ 562   2              if(requests[i])
+ 563   2              {
+ 564   3                  if(i >= currentFloor)
+ 565   3                      distance = i - currentFloor;
+ 566   3                  else
+ 567   3                      distance = currentFloor - i;
+ 568   3      
+ 569   3                  if(distance < bestDistance)
+ 570   3                  {
+ 571   4                      bestDistance = distance;
+ 572   4                      bestFloor = i;
+ 573   4                  }
+ 574   3              }
+ 575   2          }
+ 576   1      
+ 577   1          return bestFloor;
+ 578   1      }
+ 579          
+ 580          
+ 581          /* =========================
+ 582             XU LY THANG MAY
+ 583             ========================= */
+ 584          
+ 585          void process_elevator(void)
+ 586          {
+ 587   1          char nearest;
+ 588   1      
+ 589   1          /* Dang dung khan cap: khong tao lenh moi, cho ISR xu ly rieng */
+ 590   1          if(emergency)
+ 591   1              return;
+ 592   1      
+ 593   1          /* Khong xu ly khi cua dang hoat dong */
+ 594   1          if(doorState != 0)
+ 595   1              return;
+ 596   1      
+ 597   1          /* Thang dang chay thi khong tao lenh moi */
+ 598   1          if(isMoving)
+ 599   1              return;
+ 600   1      
+ 601   1          /* Co yeu cau ngay tai tang hien tai: xoa request, mo cua */
+ 602   1          if(requests[currentFloor])
+ 603   1          {
+ 604   2              requests[currentFloor] = 0;
+ 605   2              clear_floor_leds((unsigned char)currentFloor);
+ 606   2              targetFloor = -1;
+ 607   2      
+ 608   2              start_door_open();
+ 609   2      
+ 610   2              return;
+ 611   2          }
+ 612   1      
+ 613   1          nearest = find_nearest_request();
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 11  
+
+ 614   1      
+ 615   1          if(nearest >= 0)
+ 616   1          {
+ 617   2              targetFloor = nearest;
+ 618   2      
+ 619   2              if(targetFloor > currentFloor)
+ 620   2              {
+ 621   3                  start_up();
+ 622   3              }
+ 623   2              else if(targetFloor < currentFloor)
+ 624   2              {
+ 625   3                  start_down();
+ 626   3              }
+ 627   2          }
+ 628   1      }
+ 629          
+ 630          
+ 631          /* =========================
+ 632             UART (Timer 1 mode 2, 9600 baud)
+ 633             ========================= */
+ 634          
+ 635          void uart_init(void)
+ 636          {
+ 637   1          TMOD &= 0x0F;
+ 638   1          TMOD |= 0x20;       /* Timer 1 mode 2 - tao baud */
+ 639   1      
+ 640   1          TH1 = 0xFD;         /* 9600 baud @ 11.0592MHz */
+ 641   1          TL1 = 0xFD;
+ 642   1      
+ 643   1          SCON = 0x40;        /* mode 1, 8 bit */
+ 644   1          TI = 0;
+ 645   1      
+ 646   1          TR1 = 1;
+ 647   1      }
+ 648          
+ 649          void uart_send(unsigned char b)
+ 650          {
+ 651   1          SBUF = b;
+ 652   1          while(!TI);
+ 653   1          TI = 0;
+ 654   1      }
+ 655          
+ 656          void send_state(void)
+ 657          {
+ 658   1          unsigned char c;
+ 659   1          unsigned char f;
+ 660   1      
+ 661   1          c = outCmd;
+ 662   1          f = (unsigned char)currentFloor;
+ 663   1      
+ 664   1          uart_send(FRAME_HEAD);
+ 665   1          uart_send(c);
+ 666   1          uart_send(f);
+ 667   1          uart_send((unsigned char)(~(c ^ f)));
+ 668   1      }
+ 669          
+ 670          
+ 671          /* =========================
+ 672             TIMER 0 - 50ms @ 11.0592MHz
+ 673             65536 - 46080 = 19456 = 0x4C00
+ 674             ========================= */
+ 675          
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 12  
+
+ 676          void timer0_init(void)
+ 677          {
+ 678   1          TMOD &= 0xF0;
+ 679   1          TMOD |= 0x01;       /* Timer 0 mode 1 (16 bit) */
+ 680   1      
+ 681   1          TH0 = 0x4C;
+ 682   1          TL0 = 0x00;
+ 683   1      
+ 684   1          ET0 = 1;
+ 685   1          EA = 1;
+ 686   1      
+ 687   1          TR0 = 1;
+ 688   1      }
+ 689          
+ 690          
+ 691          /* =========================
+ 692             NGAT TIMER 0
+ 693             ========================= */
+ 694          
+ 695          void timer0_ISR(void) interrupt 1
+ 696          {
+ 697   1          TH0 = 0x4C;
+ 698   1          TL0 = 0x00;
+ 699   1      
+ 700   1          /* ---------- Nut STOP khan cap ---------- */
+ 701   1          if(BTN_STOP == 0)
+ 702   1          {
+ 703   2              emergency = 1;
+ 704   2      
+ 705   2              /* Dung ngay dong co thang va dong co cua, giu nguyen vi tri/tien trinh */
+ 706   2              outCmd &= (unsigned char)~(CMD_UP | CMD_DOWN | CMD_DOOR_OPEN | CMD_DOOR_CLOSE);
+ 707   2              isMoving = 0;
+ 708   2      
+ 709   2              /* Coi keu lien tuc trong luc dung khan cap */
+ 710   2              outCmd |= CMD_BUZZ;
+ 711   2      
+ 712   2              return;   /* khong xu ly cua/thang trong luc dang dung */
+ 713   2          }
+ 714   1          else if(emergency)
+ 715   1          {
+ 716   2              /* Vua nha nut STOP: cho chay/mo/dong cua tiep dung trang thai dang do dang */
+ 717   2              emergency = 0;
+ 718   2      
+ 719   2              if(doorState == 1)
+ 720   2                  outCmd |= CMD_DOOR_OPEN;
+ 721   2              else if(doorState == 3)
+ 722   2                  outCmd |= CMD_DOOR_CLOSE;
+ 723   2      
+ 724   2              outCmd &= (unsigned char)~CMD_BUZZ;
+ 725   2              buzz_timer = 0;
+ 726   2          }
+ 727   1      
+ 728   1          /* Coi */
+ 729   1          if(buzz_timer > 0)
+ 730   1          {
+ 731   2              buzz_timer--;
+ 732   2      
+ 733   2              if(buzz_timer == 0)
+ 734   2                  outCmd &= ~CMD_BUZZ;
+ 735   2          }
+ 736   1      
+ 737   1          /* Xu ly cua */
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 13  
+
+ 738   1          if(doorState != 0)
+ 739   1          {
+ 740   2              if(door_timer > 0)
+ 741   2              {
+ 742   3                  door_timer--;
+ 743   3      
+ 744   3                  if(door_timer == 0)
+ 745   3                  {
+ 746   4                      if(doorState == 1)
+ 747   4                      {
+ 748   5                          hold_door_open();
+ 749   5                      }
+ 750   4                      else if(doorState == 2)
+ 751   4                      {
+ 752   5                          start_door_close();
+ 753   5                      }
+ 754   4                      else if(doorState == 3)
+ 755   4                      {
+ 756   5                          finish_door_close();
+ 757   5                      }
+ 758   4                  }
+ 759   3              }
+ 760   2      
+ 761   2              return;
+ 762   2          }
+ 763   1      
+ 764   1          /* Xu ly thang */
+ 765   1          if(isMoving)
+ 766   1          {
+ 767   2              timer_count++;
+ 768   2      
+ 769   2              /* 40 x 50ms = 2 giay / tang */
+ 770   2              if(timer_count >= 40)
+ 771   2              {
+ 772   3                  timer_count = 0;
+ 773   3      
+ 774   3                  if(outCmd & CMD_UP)
+ 775   3                  {
+ 776   4                      if(currentFloor < 4)
+ 777   4                          currentFloor++;
+ 778   4                  }
+ 779   3                  else if(outCmd & CMD_DOWN)
+ 780   3                  {
+ 781   4                      if(currentFloor > 0)
+ 782   4                          currentFloor--;
+ 783   4                  }
+ 784   3      
+ 785   3                  /* Da den tang dich */
+ 786   3                  if(currentFloor == targetFloor)
+ 787   3                  {
+ 788   4                      stop_motor();
+ 789   4      
+ 790   4                      requests[currentFloor] = 0;
+ 791   4                      clear_floor_leds((unsigned char)currentFloor);
+ 792   4      
+ 793   4                      start_door_open();
+ 794   4                  }
+ 795   3      
+ 796   3                  /* Di ngang qua tang co yeu cau thi dung lai */
+ 797   3                  else if(requests[currentFloor])
+ 798   3                  {
+ 799   4                      stop_motor();
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 14  
+
+ 800   4      
+ 801   4                      requests[currentFloor] = 0;
+ 802   4                      clear_floor_leds((unsigned char)currentFloor);
+ 803   4      
+ 804   4                      targetFloor = -1;
+ 805   4      
+ 806   4                      start_door_open();
+ 807   4                  }
+ 808   3              }
+ 809   2          }
+ 810   1      }
+ 811          
+ 812          
+ 813          /* =========================
+ 814             KHOI TAO HE THONG
+ 815             ========================= */
+ 816          
+ 817          void system_init(void)
+ 818          {
+ 819   1          P0 = 0xFF;      /* LCD data (P0.0..P0.3) */
+ 820   1          P1 = 0xFF;      /* nut nhan */
+ 821   1          P2 = 0x00;      /* LED bao goi tang: tat het luc khoi dong */
+ 822   1          P3 = 0xFF;      /* RXD/TXD + RS/RW/E muc cao */
+ 823   1      
+ 824   1          ledLatch = 0;
+ 825   1      
+ 826   1          outCmd = 0;
+ 827   1          buzz_timer = 0;
+ 828   1      
+ 829   1          isMoving = 0;
+ 830   1          emergency = 0;
+ 831   1      
+ 832   1          currentFloor = 0;
+ 833   1          targetFloor = -1;
+ 834   1      
+ 835   1          timer_count = 0;
+ 836   1      
+ 837   1          doorState = 0;
+ 838   1          door_timer = 0;
+ 839   1      
+ 840   1          requests[0] = 0;
+ 841   1          requests[1] = 0;
+ 842   1          requests[2] = 0;
+ 843   1          requests[3] = 0;
+ 844   1          requests[4] = 0;
+ 845   1      
+ 846   1          buttonLock[0] = 0;
+ 847   1          buttonLock[1] = 0;
+ 848   1          buttonLock[2] = 0;
+ 849   1          buttonLock[3] = 0;
+ 850   1          buttonLock[4] = 0;
+ 851   1      
+ 852   1          /* LCD + man hinh chao */
+ 853   1          lcd_init();
+ 854   1      
+ 855   1          lcd_goto(0);
+ 856   1          lcd_print("THANG MAY 4 TANG");
+ 857   1          lcd_goto(1);
+ 858   1          lcd_print("Dang khoi dong..");
+ 859   1          delay_ms(800);
+ 860   1      
+ 861   1          /* UART truoc, Timer 0 sau */
+C51 COMPILER V9.01   U1_MASTER                                                             09/29/2026 10:15:57 PAGE 15  
+
+ 862   1          uart_init();
+ 863   1          timer0_init();
+ 864   1      }
+ 865          
+ 866          
+ 867          /* =========================
+ 868             HAM MAIN
+ 869             ========================= */
+ 870          
+ 871          void main(void)
+ 872          {
+ 873   1          system_init();
+ 874   1      
+ 875   1          while(1)
+ 876   1          {
+ 877   2              scan_buttons();
+ 878   2      
+ 879   2              process_elevator();
+ 880   2      
+ 881   2              /* Gui trang thai + so tang sang U4 */
+ 882   2              send_state();
+ 883   2      
+ 884   2              /* Cap nhat thong bao LCD */
+ 885   2              lcd_update();
+ 886   2      
+ 887   2              delay_ms(20);
+ 888   2          }
+ 889   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   1342    ----
+   CONSTANT SIZE    =    184    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     22       3
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

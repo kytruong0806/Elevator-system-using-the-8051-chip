@@ -1,0 +1,309 @@
+BL51 BANKED LINKER/LOCATER V6.22                                                        09/28/2026  16:06:55  PAGE 1
+
+
+BL51 BANKED LINKER/LOCATER V6.22, INVOKED BY:
+C:\KEIL\C51\BIN\BL51.EXE U4_slave.obj TO MCU2 RAMSIZE (256)
+
+
+MEMORY MODEL: SMALL
+
+
+INPUT MODULES INCLUDED:
+  U4_slave.obj (U4_SLAVE)
+  C:\KEIL\C51\LIB\C51S.LIB (?C_STARTUP)
+  C:\KEIL\C51\LIB\C51S.LIB (?C_INIT)
+
+
+LINK MAP OF MODULE:  MCU2 (U4_SLAVE)
+
+
+            TYPE    BASE      LENGTH    RELOCATION   SEGMENT NAME
+            -----------------------------------------------------
+
+            * * * * * * *   D A T A   M E M O R Y   * * * * * * *
+            REG     0000H     0008H     ABSOLUTE     "REG BANK 0"
+            DATA    0008H     0006H     UNIT         ?DT?U4_SLAVE
+                    000EH     0012H                  *** GAP ***
+            BIT     0020H.0   0000H.1   UNIT         ?BI?U4_SLAVE
+                    0020H.1   0000H.7                *** GAP ***
+            IDATA   0021H     0001H     UNIT         ?STACK
+
+            * * * * * * *   C O D E   M E M O R Y   * * * * * * *
+            CODE    0000H     0003H     ABSOLUTE     
+                    0003H     0008H                  *** GAP ***
+            CODE    000BH     0003H     ABSOLUTE     
+                    000EH     0015H                  *** GAP ***
+            CODE    0023H     0003H     ABSOLUTE     
+                    0026H     07DAH                  *** GAP ***
+            CODE    0800H     008CH     UNIT         ?C_C51STARTUP
+            CODE    088CH     0069H     UNIT         ?PR?_APPLY_CMD?U4_SLAVE
+            CODE    08F5H     0055H     UNIT         ?PR?SERIAL_ISR?U4_SLAVE
+            CODE    094AH     0033H     UNIT         ?PR?MAIN?U4_SLAVE
+            CODE    097DH     0018H     UNIT         ?PR?TIMER0_ISR?U4_SLAVE
+            CODE    0995H     0015H     UNIT         ?C_INITSEG
+            CODE    09AAH     0014H     UNIT         ?PR?UART_INIT?U4_SLAVE
+            CODE    09BEH     0011H     UNIT         ?PR?TIMER0_INIT?U4_SLAVE
+            CODE    09CFH     000EH     UNIT         ?PR?_DISPLAY_FLOOR?U4_SLAVE
+            CODE    09DDH     000AH     UNIT         ?PR?IO_INIT?U4_SLAVE
+            CODE    09E7H     0005H     UNIT         ?CO?U4_SLAVE
+
+
+
+OVERLAY MAP OF MODULE:   MCU2 (U4_SLAVE)
+
+
+SEGMENT
+  +--> CALLED SEGMENT
+---------------------
+?C_C51STARTUP
+  +--> ?PR?MAIN?U4_SLAVE
+  +--> ?C_INITSEG
+
+BL51 BANKED LINKER/LOCATER V6.22                                                      09/28/2026  16:06:55  PAGE 2
+
+
+?PR?MAIN?U4_SLAVE
+  +--> ?PR?IO_INIT?U4_SLAVE
+  +--> ?PR?_APPLY_CMD?U4_SLAVE
+  +--> ?PR?UART_INIT?U4_SLAVE
+  +--> ?PR?TIMER0_INIT?U4_SLAVE
+  +--> ?PR?_DISPLAY_FLOOR?U4_SLAVE
+
+?PR?_DISPLAY_FLOOR?U4_SLAVE
+  +--> ?CO?U4_SLAVE
+
+
+
+SYMBOL TABLE OF MODULE:  MCU2 (U4_SLAVE)
+
+  VALUE           TYPE          NAME
+  ----------------------------------
+
+  -------         MODULE        U4_SLAVE
+  C:0000H         SYMBOL        _ICE_DUMMY_
+  D:0080H         PUBLIC        P0
+  C:09CFH         PUBLIC        _display_floor
+  D:0008H         PUBLIC        rxCmd
+  D:0090H         PUBLIC        P1
+  D:00A0H         PUBLIC        P2
+  D:00B0H         PUBLIC        P3
+  B:00A8H.7       PUBLIC        EA
+  D:0009H         PUBLIC        rxFloorTemp
+  D:00A8H         PUBLIC        IE
+  B:00B0H.3       PUBLIC        doorCLIN2
+  B:00B0H.7       PUBLIC        EN
+  B:0020H.0       PUBLIC        rxNew
+  B:00A8H.4       PUBLIC        ES
+  D:00B8H         PUBLIC        IP
+  D:000AH         PUBLIC        rxCmdTemp
+  D:000BH         PUBLIC        commTimeout
+  B:0098H.0       PUBLIC        RI
+  B:0098H.1       PUBLIC        TI
+  B:00B0H.2       PUBLIC        doorOPIN1
+  C:097DH         PUBLIC        timer0_ISR
+  C:094AH         PUBLIC        main
+  B:00B0H.4       PUBLIC        DoorEN
+  D:0099H         PUBLIC        SBUF
+  D:0098H         PUBLIC        SCON
+  D:0089H         PUBLIC        TMOD
+  D:0088H         PUBLIC        TCON
+  C:09E7H         PUBLIC        seg_code
+  C:088CH         PUBLIC        _apply_cmd
+  B:00B0H.5       PUBLIC        IN1
+  B:00B0H.6       PUBLIC        IN2
+  B:00A8H.1       PUBLIC        ET0
+  B:00A0H.3       PUBLIC        BUZZ
+  D:008CH         PUBLIC        TH0
+  D:008DH         PUBLIC        TH1
+  D:008AH         PUBLIC        TL0
+  D:008BH         PUBLIC        TL1
+  C:08F5H         PUBLIC        serial_ISR
+  C:09AAH         PUBLIC        uart_init
+BL51 BANKED LINKER/LOCATER V6.22                                                      09/28/2026  16:06:55  PAGE 3
+
+
+  B:0088H.4       PUBLIC        TR0
+  B:0088H.6       PUBLIC        TR1
+  B:00A0H.0       PUBLIC        LED_UP
+  D:00C8H         PUBLIC        T2CON
+  C:09BEH         PUBLIC        timer0_init
+  B:00A0H.1       PUBLIC        LED_WAIT
+  C:09DDH         PUBLIC        io_init
+  D:000CH         PUBLIC        rxState
+  B:00A0H.2       PUBLIC        LED_DOWN
+  D:000DH         PUBLIC        rxFloor
+  D:00D0H         PUBLIC        PSW
+  -------         PROC          _DISPLAY_FLOOR
+  D:0007H         SYMBOL        floor
+  C:09CFH         LINE#         82
+  C:09CFH         LINE#         83
+  C:09CFH         LINE#         84
+  C:09D5H         LINE#         87
+  C:09DCH         LINE#         88
+  -------         ENDPROC       _DISPLAY_FLOOR
+  -------         PROC          _APPLY_CMD
+  D:0007H         SYMBOL        c
+  C:088CH         LINE#         95
+  C:088CH         LINE#         96
+  C:088CH         LINE#         98
+  C:0893H         LINE#         99
+  C:0893H         LINE#         100
+  C:0895H         LINE#         101
+  C:0897H         LINE#         102
+  C:0899H         LINE#         104
+  C:089BH         LINE#         105
+  C:089DH         LINE#         106
+  C:089FH         LINE#         107
+  C:08A6H         LINE#         108
+  C:08A6H         LINE#         109
+  C:08A8H         LINE#         110
+  C:08AAH         LINE#         111
+  C:08ACH         LINE#         113
+  C:08AEH         LINE#         114
+  C:08B0H         LINE#         115
+  C:08B2H         LINE#         117
+  C:08B2H         LINE#         118
+  C:08B4H         LINE#         119
+  C:08B6H         LINE#         120
+  C:08B8H         LINE#         122
+  C:08BAH         LINE#         123
+  C:08BCH         LINE#         124
+  C:08BCH         LINE#         127
+  C:08C3H         LINE#         128
+  C:08C3H         LINE#         129
+  C:08C5H         LINE#         130
+  C:08C7H         LINE#         131
+  C:08C9H         LINE#         132
+  C:08CBH         LINE#         133
+  C:08D2H         LINE#         134
+  C:08D2H         LINE#         135
+  C:08D4H         LINE#         136
+  C:08D6H         LINE#         137
+BL51 BANKED LINKER/LOCATER V6.22                                                      09/28/2026  16:06:55  PAGE 4
+
+
+  C:08D8H         LINE#         138
+  C:08DAH         LINE#         140
+  C:08DAH         LINE#         141
+  C:08DCH         LINE#         142
+  C:08DEH         LINE#         143
+  C:08E0H         LINE#         144
+  C:08E0H         LINE#         147
+  C:08EAH         LINE#         148
+  C:08F4H         LINE#         149
+  -------         ENDPROC       _APPLY_CMD
+  -------         PROC          UART_INIT
+  C:09AAH         LINE#         156
+  C:09AAH         LINE#         157
+  C:09AAH         LINE#         158
+  C:09ADH         LINE#         159
+  C:09B0H         LINE#         161
+  C:09B3H         LINE#         162
+  C:09B6H         LINE#         164
+  C:09B9H         LINE#         166
+  C:09BBH         LINE#         168
+  C:09BDH         LINE#         169
+  -------         ENDPROC       UART_INIT
+  -------         PROC          TIMER0_INIT
+  C:09BEH         LINE#         176
+  C:09BEH         LINE#         177
+  C:09BEH         LINE#         178
+  C:09C1H         LINE#         179
+  C:09C4H         LINE#         181
+  C:09C7H         LINE#         182
+  C:09CAH         LINE#         184
+  C:09CCH         LINE#         185
+  C:09CEH         LINE#         186
+  -------         ENDPROC       TIMER0_INIT
+  -------         PROC          TIMER0_ISR
+  C:097DH         LINE#         188
+  C:0981H         LINE#         190
+  C:0984H         LINE#         191
+  C:0987H         LINE#         193
+  C:098EH         LINE#         194
+  C:0990H         LINE#         195
+  -------         ENDPROC       TIMER0_ISR
+  -------         PROC          SERIAL_ISR
+  -------         DO            
+  D:0007H         SYMBOL        b
+  -------         ENDDO         
+  C:08F5H         LINE#         202
+  C:08FEH         LINE#         206
+  C:0901H         LINE#         207
+  C:0901H         LINE#         208
+  C:0903H         LINE#         209
+  C:0905H         LINE#         211
+  C:0909H         LINE#         212
+  C:0909H         LINE#         213
+  C:090EH         LINE#         214
+  C:0911H         LINE#         215
+  C:0913H         LINE#         216
+  C:0918H         LINE#         217
+BL51 BANKED LINKER/LOCATER V6.22                                                      09/28/2026  16:06:55  PAGE 5
+
+
+  C:0918H         LINE#         218
+  C:091AH         LINE#         219
+  C:091DH         LINE#         220
+  C:091FH         LINE#         221
+  C:0924H         LINE#         222
+  C:0924H         LINE#         223
+  C:0926H         LINE#         224
+  C:0929H         LINE#         225
+  C:092BH         LINE#         227
+  C:092BH         LINE#         229
+  C:0933H         LINE#         230
+  C:0933H         LINE#         231
+  C:0936H         LINE#         232
+  C:0939H         LINE#         233
+  C:093BH         LINE#         234
+  C:093BH         LINE#         236
+  C:093EH         LINE#         237
+  C:093EH         LINE#         238
+  C:093EH         LINE#         240
+  C:0941H         LINE#         241
+  C:0943H         LINE#         242
+  -------         ENDPROC       SERIAL_ISR
+  -------         PROC          IO_INIT
+  C:09DDH         LINE#         249
+  C:09DDH         LINE#         250
+  C:09DDH         LINE#         252
+  C:09E0H         LINE#         255
+  C:09E3H         LINE#         258
+  C:09E6H         LINE#         259
+  -------         ENDPROC       IO_INIT
+  -------         PROC          MAIN
+  C:094AH         LINE#         266
+  C:094AH         LINE#         267
+  C:094AH         LINE#         268
+  C:094DH         LINE#         269
+  C:0952H         LINE#         271
+  C:0955H         LINE#         272
+  C:0958H         LINE#         274
+  C:095AH         LINE#         276
+  C:095AH         LINE#         277
+  C:095AH         LINE#         278
+  C:095DH         LINE#         279
+  C:095DH         LINE#         280
+  C:095FH         LINE#         281
+  C:0962H         LINE#         283
+  C:0967H         LINE#         284
+  C:096CH         LINE#         285
+  C:096CH         LINE#         288
+  C:0973H         LINE#         289
+  C:0973H         LINE#         290
+  C:0978H         LINE#         291
+  C:097BH         LINE#         292
+  C:097BH         LINE#         293
+  -------         ENDPROC       MAIN
+  -------         ENDMOD        U4_SLAVE
+
+******************************************************************************
+BL51 BANKED LINKER/LOCATER V6.22                                                      09/28/2026  16:06:55  PAGE 6
+
+
+* RESTRICTED VERSION WITH 0800H BYTE CODE SIZE LIMIT; USED: 0165H BYTE (17%) *
+******************************************************************************
+
+Program Size: data=15.1 xdata=0 code=501
+LINK/LOCATE RUN COMPLETE.  0 WARNING(S),  0 ERROR(S)
