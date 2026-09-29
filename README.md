@@ -52,7 +52,6 @@ Hệ thống mô phỏng một thang máy phục vụ **5 tầng (0, 1, 2, 3, 4)
 Project/
 ├── U1_master.c            # Mã nguồn MASTER (U1) – dùng cho MCU1
 ├── U4_slave.c             # Mã nguồn SLAVE  (U4) – dùng cho MCU2
-├── main.c                 # Bản cũ: thang máy chạy 1 MCU duy nhất (tham khảo, KHÔNG nằm trong MCU1/MCU2)
 │
 ├── MCU1.uvproj            # Project Keil cho U1 (AT89C52)  → MCU1.hex
 ├── MCU2.uvproj            # Project Keil cho U4 (AT89F52)  → MCU2.hex
